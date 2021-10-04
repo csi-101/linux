@@ -32,7 +32,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v1.1.3
         with:
           # A repo scoped GitHub Personal Access Token
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SEBASTIAN_CREDENTIALS }}
           # The full name of the repository to send the dispatch.
           repository: sebastianrcnt/scripts
           # A custom webhook event name.

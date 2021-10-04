@@ -22,9 +22,9 @@ jobs:
     steps:
       - name: Webhook Trigger
         env:
-          SEBASTIAN_CREDENTIALS:  ${{ secrets.SEBASTIAN_CREDENTIALS }}
+          GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -H "Authorization: token $SEBASTIAN_CREDENTIALS" \
+          curl -H "Authorization: token ${GITHUB_TOKEN}" \
             --request POST \
             --data '{"event_type": "webhook"}' \
             https://api.github.com/repos/sebastianrcnt/scripts/dispatches

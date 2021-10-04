@@ -21,10 +21,8 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Webhook Trigger
-        env:
-          GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -H "Authorization: token ${GITHUB_TOKEN}" \
+          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN}}" \
             --request POST \
             --data '{"event_type": "webhook"}' \
             https://api.github.com/repos/sebastianrcnt/scripts/dispatches

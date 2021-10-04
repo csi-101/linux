@@ -24,6 +24,7 @@ jobs:
         env:
           SEBASTIAN_CREDENTIALS:  ${{ secrets.SEBASTIAN_CREDENTIALS }}
         run: |
-          curl -H "Authorization: token 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"
-            \ --request POST
-            \ --data '{"event_type": "webhook"}' https://api.github.com/repos/sebastianrcnt/scripts/dispatches
+          curl -H "Authorization: token $SEBASTIAN_CREDENTIALS" \
+            --request POST \
+            --data '{"event_type": "webhook"}' \
+            https://api.github.com/repos/sebastianrcnt/scripts/dispatches

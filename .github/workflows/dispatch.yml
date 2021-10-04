@@ -13,4 +13,5 @@ jobs:
           -X POST \
           -H "Accept: application/vnd.github.v3+json" \
           https://api.github.com/repos/seanK200/scripts/actions/workflows/linux.yml/dispatches \
-          -d '{"ref":"csi2115-f21"}';
+          -d '{"ref":"csi2115-f21"}' \
+          -u seanK200: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;

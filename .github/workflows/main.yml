@@ -21,11 +21,9 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Webhook Trigger
-        uses: zzzze/webhook-trigger@v1.0.0
         env:
           SEBASTIAN_CREDENTIALS:  ${{ secrets.SEBASTIAN_CREDENTIALS }}
-        with:
-          # Data to be posted
-          data: '{"event_type": "webhook"}'
-          webhook_url: https://api.github.com/repos/sebastianrcnt/scripts/dispatches
-          options: "-H 'Authorization: token $SEBASTIAN_CREDENTIALS'"
+        run: |
+          curl -H "Authorization: token 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"
+            \ --request POST
+            \ --data '{"event_type": "webhook"}' https://api.github.com/repos/sebastianrcnt/scripts/dispatches

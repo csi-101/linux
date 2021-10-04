@@ -6,11 +6,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Project
-        uses: actions/checkout@v2
       - name: Trigger workflow
         run: |
-          sudo apt-get insatll curl;
+          sudo apt-get install curl;
           curl \
           -X POST
           -H "Accept: application/vnd.github.v3+json" \

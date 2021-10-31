@@ -729,6 +729,26 @@ append:
 	wq_list_add_after(&work->list, &tail->list, &wqe->work_list);
 }
 
+static int io_wq_fork_manager(struct io_wq *wq)
+{
+	int ret;
+
+	if (wq->manager)
+		return 0;
+
+	clear_bit(IO_WQ_BIT_EXIT, &wq->state);
+	refcount_inc(&wq->refs);
+	current->flags |= PF_IO_WORKER;
+	ret = io_wq_fork_thread(io_wq_manager, wq);
+	current->flags &= ~PF_IO_WORKER;
+	if (ret >= 0) {
+		wait_for_completion(&wq->done);
+		return 0;
+	}
+
+	return ret;
+}
+
 static void io_wqe_enqueue(struct io_wqe *wqe, struct io_wq_work *work)
 {
 	struct io_wqe_acct *acct = io_work_get_acct(wqe, work);
@@ -954,9 +974,12 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 
 	wq->task = get_task_struct(data->task);
 	refcount_set(&wq->refs, 1);
-	atomic_set(&wq->worker_refs, 1);
-	init_completion(&wq->worker_done);
-	return wq;
+
+	ret = io_wq_fork_manager(wq);
+	if (!ret)
+		return wq;
+
+	io_wq_put_hash(data->hash);
 err:
 	io_wq_put_hash(data->hash);
 	cpuhp_state_remove_instance_nocalls(io_wq_online, &wq->cpuhp_node);

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2019 Marvell International Ltd.
+ * Copyright (C) 2019 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifdef CONFIG_DEBUG_FS
@@ -2113,9 +2110,6 @@ static void rvu_print_npc_mcam_info(struct seq_file *s,
 	int entry_acnt, entry_ecnt;
 	int cntr_acnt, cntr_ecnt;
 
-	/* Skip PF0 */
-	if (!pcifunc)
-		return;
 	rvu_npc_get_mcam_entry_alloc_info(rvu, pcifunc, blkaddr,
 					  &entry_acnt, &entry_ecnt);
 	rvu_npc_get_mcam_counter_alloc_info(rvu, pcifunc, blkaddr,
@@ -2298,7 +2292,7 @@ static void rvu_dbg_npc_mcam_show_flows(struct seq_file *s,
 static void rvu_dbg_npc_mcam_show_action(struct seq_file *s,
 					 struct rvu_npc_mcam_rule *rule)
 {
-	if (rule->intf == NIX_INTF_TX) {
+	if (is_npc_intf_tx(rule->intf)) {
 		switch (rule->tx_action.op) {
 		case NIX_TX_ACTIONOP_DROP:
 			seq_puts(s, "\taction: Drop\n");

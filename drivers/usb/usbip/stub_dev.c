@@ -76,12 +76,6 @@ static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *a
 			goto err;
 		}
 
-		if (socket->type != SOCK_STREAM) {
-			dev_err(dev, "Expecting SOCK_STREAM - found %d",
-				socket->type);
-			goto sock_err;
-		}
-
 		/* unlock and create threads and get tasks */
 		spin_unlock_irq(&sdev->ud.lock);
 		tcp_rx = kthread_create(stub_rx_loop, &sdev->ud, "stub_rx");

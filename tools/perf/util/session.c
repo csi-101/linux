@@ -102,11 +102,11 @@ static int perf_session__deliver_event(struct perf_session *session,
 				       struct perf_tool *tool,
 				       u64 file_offset);
 
-static int perf_session__open(struct perf_session *session)
+static int perf_session__open(struct perf_session *session, int repipe_fd)
 {
 	struct perf_data *data = session->data;
 
-	if (perf_session__read_header(session) < 0) {
+	if (perf_session__read_header(session, repipe_fd) < 0) {
 		pr_err("incompatible file format (rerun with -v to learn more)\n");
 		return -1;
 	}
@@ -185,8 +185,9 @@ static int ordered_events__deliver_event(struct ordered_events *oe,
 					   session->tool, event->file_offset);
 }
 
-struct perf_session *perf_session__new(struct perf_data *data,
-				       bool repipe, struct perf_tool *tool)
+struct perf_session *__perf_session__new(struct perf_data *data,
+					 bool repipe, int repipe_fd,
+					 struct perf_tool *tool)
 {
 	int ret = -ENOMEM;
 	struct perf_session *session = zalloc(sizeof(*session));
@@ -210,7 +211,7 @@ struct perf_session *perf_session__new(struct perf_data *data,
 		session->data = data;
 
 		if (perf_data__is_read(data)) {
-			ret = perf_session__open(session);
+			ret = perf_session__open(session, repipe_fd);
 			if (ret < 0)
 				goto out_delete;
 
@@ -301,8 +302,12 @@ void perf_session__delete(struct perf_session *session)
 	perf_session__release_decomp_events(session);
 	perf_env__exit(&session->header.env);
 	machines__exit(&session->machines);
-	if (session->data)
+	if (session->data) {
+		if (perf_data__is_read(session->data))
+			evlist__delete(session->evlist);
 		perf_data__close(session->data);
+	}
+	trace_event__cleanup(&session->tevent);
 	free(session);
 }
 
@@ -904,7 +909,7 @@ static void perf_event__cpu_map_swap(union perf_event *event,
 	struct perf_record_record_cpu_map *mask;
 	unsigned i;
 
-	data->type = bswap_64(data->type);
+	data->type = bswap_16(data->type);
 
 	switch (data->type) {
 	case PERF_CPU_MAP__CPUS:
@@ -937,7 +942,7 @@ static void perf_event__stat_config_swap(union perf_event *event,
 {
 	u64 size;
 
-	size  = event->stat_config.nr * sizeof(event->stat_config.data[0]);
+	size  = bswap_64(event->stat_config.nr) * sizeof(event->stat_config.data[0]);
 	size += 1; /* nr item itself */
 	mem_bswap_64(&event->stat_config.nr, size);
 }
@@ -1536,6 +1541,8 @@ static int machines__deliver_event(struct machines *machines,
 				evlist->stats.total_aux_lost += 1;
 			if (event->aux.flags & PERF_AUX_FLAG_PARTIAL)
 				evlist->stats.total_aux_partial += 1;
+			if (event->aux.flags & PERF_AUX_FLAG_COLLISION)
+				evlist->stats.total_aux_collision += 1;
 		}
 		return tool->aux(tool, event, sample, machine);
 	case PERF_RECORD_ITRACE_START:
@@ -1723,6 +1730,7 @@ int perf_session__peek_event(struct perf_session *session, off_t file_offset,
 	if (event->header.size < hdr_sz || event->header.size > buf_sz)
 		return -1;
 
+	buf += hdr_sz;
 	rest = event->header.size - hdr_sz;
 
 	if (readn(fd, buf, rest) != (ssize_t)rest)
@@ -1888,6 +1896,13 @@ static void perf_session__warn_about_errors(const struct perf_session *session)
 			    "\nReloading kvm_intel module with vmm_exclusive=0\n"
 			    "will reduce the gaps to only guest's timeslices." :
 			    "");
+	}
+
+	if (session->tool->aux == perf_event__process_aux &&
+	    stats->total_aux_collision != 0) {
+		ui__warning("AUX data detected collision  %" PRIu64 " times out of %u!\n\n",
+			    stats->total_aux_collision,
+			    stats->nr_events[PERF_RECORD_AUX]);
 	}
 
 	if (stats->nr_unknown_events != 0) {
@@ -2101,7 +2116,7 @@ fetch_decomp_event(u64 head, size_t mmap_size, char *buf, bool needs_swap)
 static int __perf_session__process_decomp_events(struct perf_session *session)
 {
 	s64 skip;
-	u64 size, file_pos = 0;
+	u64 size;
 	struct decomp *decomp = session->decomp_last;
 
 	if (!decomp)
@@ -2117,7 +2132,7 @@ static int __perf_session__process_decomp_events(struct perf_session *session)
 		size = event->header.size;
 
 		if (size < sizeof(struct perf_event_header) ||
-		    (skip = perf_session__process_event(session, event, file_pos)) < 0) {
+		    (skip = perf_session__process_event(session, event, decomp->file_pos)) < 0) {
 			pr_err("%#" PRIx64 " [%#x]: failed to process type: %d\n",
 				decomp->file_pos + decomp->head, event->header.size, event->header.type);
 			return -EINVAL;
@@ -2155,6 +2170,7 @@ struct reader {
 	u64		 data_size;
 	u64		 data_offset;
 	reader_cb_t	 process;
+	bool		 in_place_update;
 };
 
 static int
@@ -2188,7 +2204,9 @@ reader__process_events(struct reader *rd, struct perf_session *session,
 	mmap_prot  = PROT_READ;
 	mmap_flags = MAP_SHARED;
 
-	if (session->header.needs_swap) {
+	if (rd->in_place_update) {
+		mmap_prot  |= PROT_WRITE;
+	} else if (session->header.needs_swap) {
 		mmap_prot  |= PROT_WRITE;
 		mmap_flags = MAP_PRIVATE;
 	}
@@ -2274,6 +2292,7 @@ static int __perf_session__process_events(struct perf_session *session)
 		.data_size	= session->header.data_size,
 		.data_offset	= session->header.data_offset,
 		.process	= process_simple,
+		.in_place_update = session->data->in_place_update,
 	};
 	struct ordered_events *oe = &session->ordered_events;
 	struct perf_tool *tool = session->tool;

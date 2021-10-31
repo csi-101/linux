@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
 /* Copyright 2017 Microsemi Corporation
- * Copyright 2018-2019 NXP Semiconductors
+ * Copyright 2018-2019 NXP
  */
 #include <linux/fsl/enetc_mdio.h>
 #include <soc/mscc/ocelot_qsys.h>
@@ -1227,12 +1227,17 @@ static int vsc9959_qos_port_tas_set(struct ocelot *ocelot, int port,
 	if (taprio->num_entries > VSC9959_TAS_GCL_ENTRY_MAX)
 		return -ERANGE;
 
-	/* Set port num and disable ALWAYS_GUARD_BAND_SCH_Q, which means set
-	 * guard band to be implemented for nonschedule queues to schedule
-	 * queues transition.
+	/* Enable guard band. The switch will schedule frames without taking
+	 * their length into account. Thus we'll always need to enable the
+	 * guard band which reserves the time of a maximum sized frame at the
+	 * end of the time window.
+	 *
+	 * Although the ALWAYS_GUARD_BAND_SCH_Q bit is global for all ports, we
+	 * need to set PORT_NUM, because subsequent writes to PARAM_CFG_REG_n
+	 * operate on the port number.
 	 */
-	ocelot_rmw(ocelot,
-		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM(port),
+	ocelot_rmw(ocelot, QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM(port) |
+		   QSYS_TAS_PARAM_CFG_CTRL_ALWAYS_GUARD_BAND_SCH_Q,
 		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM_M |
 		   QSYS_TAS_PARAM_CFG_CTRL_ALWAYS_GUARD_BAND_SCH_Q,
 		   QSYS_TAS_PARAM_CFG_CTRL);
@@ -1467,9 +1472,10 @@ err_pci_enable:
 
 static void felix_pci_remove(struct pci_dev *pdev)
 {
-	struct felix *felix;
+	struct felix *felix = pci_get_drvdata(pdev);
 
-	felix = pci_get_drvdata(pdev);
+	if (!felix)
+		return;
 
 	dsa_unregister_switch(felix->ds);
 
@@ -1477,6 +1483,20 @@ static void felix_pci_remove(struct pci_dev *pdev)
 	kfree(felix);
 
 	pci_disable_device(pdev);
+
+	pci_set_drvdata(pdev, NULL);
+}
+
+static void felix_pci_shutdown(struct pci_dev *pdev)
+{
+	struct felix *felix = pci_get_drvdata(pdev);
+
+	if (!felix)
+		return;
+
+	dsa_switch_shutdown(felix->ds);
+
+	pci_set_drvdata(pdev, NULL);
 }
 
 static struct pci_device_id felix_ids[] = {
@@ -1493,6 +1513,7 @@ static struct pci_driver felix_vsc9959_pci_driver = {
 	.id_table	= felix_ids,
 	.probe		= felix_pci_probe,
 	.remove		= felix_pci_remove,
+	.shutdown	= felix_pci_shutdown,
 };
 module_pci_driver(felix_vsc9959_pci_driver);
 

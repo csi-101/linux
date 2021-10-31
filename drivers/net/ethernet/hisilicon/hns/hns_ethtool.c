@@ -192,7 +192,7 @@ static int hns_nic_get_link_ksettings(struct net_device *net_dev,
 }
 
 /**
- *hns_nic_set_link_settings - implement ethtool set link ksettings
+ *hns_nic_set_link_ksettings - implement ethtool set link ksettings
  *@net_dev: net_device
  *@cmd: ethtool_link_ksettings
  *retuen 0 - success , negative --fail
@@ -730,11 +730,15 @@ static int hns_set_pauseparam(struct net_device *net_dev,
  * hns_get_coalesce - get coalesce info.
  * @net_dev: net device
  * @ec: coalesce info.
+ * @kernel_coal: ethtool CQE mode setting structure
+ * @extack: extack for reporting error messages
  *
  * Return 0 on success, negative on failure.
  */
 static int hns_get_coalesce(struct net_device *net_dev,
-			    struct ethtool_coalesce *ec)
+			    struct ethtool_coalesce *ec,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -774,11 +778,15 @@ static int hns_get_coalesce(struct net_device *net_dev,
  * hns_set_coalesce - set coalesce info.
  * @net_dev: net device
  * @ec: coalesce info.
+ * @kernel_coal: ethtool CQE mode setting structure
+ * @extack: extack for reporting error messages
  *
  * Return 0 on success, negative on failure.
  */
 static int hns_set_coalesce(struct net_device *net_dev,
-			    struct ethtool_coalesce *ec)
+			    struct ethtool_coalesce *ec,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -827,7 +835,7 @@ hns_get_channels(struct net_device *net_dev, struct ethtool_channels *ch)
 }
 
 /**
- * get_ethtool_stats - get detail statistics.
+ * hns_get_ethtool_stats - get detail statistics.
  * @netdev: net device
  * @stats: statistics info.
  * @data: statistics data.
@@ -885,7 +893,7 @@ static void hns_get_ethtool_stats(struct net_device *netdev,
 }
 
 /**
- * get_strings: Return a set of strings that describe the requested objects
+ * hns_get_strings: Return a set of strings that describe the requested objects
  * @netdev: net device
  * @stringset: string set ID.
  * @data: objects data.

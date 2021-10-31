@@ -41,7 +41,7 @@ struct mt6315_chip {
 		.type = REGULATOR_VOLTAGE,			\
 		.id = _bid,					\
 		.owner = THIS_MODULE,				\
-		.n_voltages = 0xbf,				\
+		.n_voltages = 0xc0,				\
 		.linear_ranges = mt_volt_range1,		\
 		.n_linear_ranges = ARRAY_SIZE(mt_volt_range1),	\
 		.vsel_reg = _vsel,				\
@@ -59,7 +59,7 @@ static const struct linear_range mt_volt_range1[] = {
 	REGULATOR_LINEAR_RANGE(0, 0, 0xbf, 6250),
 };
 
-static unsigned int mt6315_map_mode(u32 mode)
+static unsigned int mt6315_map_mode(unsigned int mode)
 {
 	switch (mode) {
 	case MT6315_BUCK_MODE_AUTO:
@@ -69,7 +69,7 @@ static unsigned int mt6315_map_mode(u32 mode)
 	case MT6315_BUCK_MODE_LP:
 		return REGULATOR_MODE_IDLE;
 	default:
-		return -EINVAL;
+		return REGULATOR_MODE_INVALID;
 	}
 }
 

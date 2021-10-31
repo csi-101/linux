@@ -2,6 +2,7 @@
 /* Copyright (c) 2021 Mellanox Technologies. */
 
 #include <net/fib_notifier.h>
+#include <net/nexthop.h>
 #include "tc_tun_encap.h"
 #include "en_tc.h"
 #include "tc_tun.h"
@@ -250,9 +251,12 @@ static void mlx5e_take_all_route_decap_flows(struct mlx5e_route_entry *r,
 		mlx5e_take_tmp_flow(flow, flow_list, 0);
 }
 
+typedef bool (match_cb)(struct mlx5e_encap_entry *);
+
 static struct mlx5e_encap_entry *
-mlx5e_get_next_valid_encap(struct mlx5e_neigh_hash_entry *nhe,
-			   struct mlx5e_encap_entry *e)
+mlx5e_get_next_matching_encap(struct mlx5e_neigh_hash_entry *nhe,
+			      struct mlx5e_encap_entry *e,
+			      match_cb match)
 {
 	struct mlx5e_encap_entry *next = NULL;
 
@@ -287,12 +291,36 @@ retry:
 	/* wait for encap to be fully initialized */
 	wait_for_completion(&next->res_ready);
 	/* continue searching if encap entry is not in valid state after completion */
-	if (!(next->flags & MLX5_ENCAP_ENTRY_VALID)) {
+	if (!match(next)) {
 		e = next;
 		goto retry;
 	}
 
 	return next;
+}
+
+static bool mlx5e_encap_valid(struct mlx5e_encap_entry *e)
+{
+	return e->flags & MLX5_ENCAP_ENTRY_VALID;
+}
+
+static struct mlx5e_encap_entry *
+mlx5e_get_next_valid_encap(struct mlx5e_neigh_hash_entry *nhe,
+			   struct mlx5e_encap_entry *e)
+{
+	return mlx5e_get_next_matching_encap(nhe, e, mlx5e_encap_valid);
+}
+
+static bool mlx5e_encap_initialized(struct mlx5e_encap_entry *e)
+{
+	return e->compl_result >= 0;
+}
+
+struct mlx5e_encap_entry *
+mlx5e_get_next_init_encap(struct mlx5e_neigh_hash_entry *nhe,
+			  struct mlx5e_encap_entry *e)
+{
+	return mlx5e_get_next_matching_encap(nhe, e, mlx5e_encap_initialized);
 }
 
 void mlx5e_tc_update_neigh_used_value(struct mlx5e_neigh_hash_entry *nhe)
@@ -476,16 +504,11 @@ void mlx5e_detach_decap(struct mlx5e_priv *priv,
 	mlx5e_decap_dealloc(priv, d);
 }
 
-struct encap_key {
-	const struct ip_tunnel_key *ip_tun_key;
-	struct mlx5e_tc_tunnel *tc_tunnel;
-};
-
-static int cmp_encap_info(struct encap_key *a,
-			  struct encap_key *b)
+bool mlx5e_tc_tun_encap_info_equal_generic(struct mlx5e_encap_key *a,
+					   struct mlx5e_encap_key *b)
 {
-	return memcmp(a->ip_tun_key, b->ip_tun_key, sizeof(*a->ip_tun_key)) ||
-		a->tc_tunnel->tunnel_type != b->tc_tunnel->tunnel_type;
+	return memcmp(a->ip_tun_key, b->ip_tun_key, sizeof(*a->ip_tun_key)) == 0 &&
+		a->tc_tunnel->tunnel_type == b->tc_tunnel->tunnel_type;
 }
 
 static int cmp_decap_info(struct mlx5e_decap_key *a,
@@ -494,7 +517,7 @@ static int cmp_decap_info(struct mlx5e_decap_key *a,
 	return memcmp(&a->key, &b->key, sizeof(b->key));
 }
 
-static int hash_encap_info(struct encap_key *key)
+static int hash_encap_info(struct mlx5e_encap_key *key)
 {
 	return jhash(key->ip_tun_key, sizeof(*key->ip_tun_key),
 		     key->tc_tunnel->tunnel_type);
@@ -516,18 +539,18 @@ static bool mlx5e_decap_take(struct mlx5e_decap_entry *e)
 }
 
 static struct mlx5e_encap_entry *
-mlx5e_encap_get(struct mlx5e_priv *priv, struct encap_key *key,
+mlx5e_encap_get(struct mlx5e_priv *priv, struct mlx5e_encap_key *key,
 		uintptr_t hash_key)
 {
 	struct mlx5_eswitch *esw = priv->mdev->priv.eswitch;
+	struct mlx5e_encap_key e_key;
 	struct mlx5e_encap_entry *e;
-	struct encap_key e_key;
 
 	hash_for_each_possible_rcu(esw->offloads.encap_tbl, e,
 				   encap_hlist, hash_key) {
 		e_key.ip_tun_key = &e->tun_info->key;
 		e_key.tc_tunnel = e->tunnel;
-		if (!cmp_encap_info(&e_key, key) &&
+		if (e->tunnel->encap_info_equal(&e_key, key) &&
 		    mlx5e_encap_take(e))
 			return e;
 	}
@@ -694,8 +717,8 @@ int mlx5e_attach_encap(struct mlx5e_priv *priv,
 	struct mlx5_flow_attr *attr = flow->attr;
 	const struct ip_tunnel_info *tun_info;
 	unsigned long tbl_time_before = 0;
-	struct encap_key key;
 	struct mlx5e_encap_entry *e;
+	struct mlx5e_encap_key key;
 	bool entry_created = false;
 	unsigned short family;
 	uintptr_t hash_key;
@@ -1509,7 +1532,7 @@ mlx5e_init_fib_work_ipv4(struct mlx5e_priv *priv,
 
 	fen_info = container_of(info, struct fib_entry_notifier_info, info);
 	fib_dev = fib_info_nh(fen_info->fi, 0)->fib_nh_dev;
-	if (fib_dev->netdev_ops != &mlx5e_netdev_ops ||
+	if (!fib_dev || fib_dev->netdev_ops != &mlx5e_netdev_ops ||
 	    fen_info->dst_len != 32)
 		return NULL;
 
